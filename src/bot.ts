@@ -7,7 +7,8 @@ import { errMsg, log } from './logger.js';
 import { blockNewPositionReason, decideExit } from './risk.js';
 import { RugCheckClient } from './rugcheck.js';
 import { type BotState, type Position, StateStore, TradeJournal, pruneLists, rollDay } from './state.js';
-import { candidateScore, marketRejections, roundtripRejections, safetyRejections, type Candidate } from './strategy.js';
+import { compareCandidates, isIncompleteReport, marketRejections, rankedScore, roundtripRejections, safetyRejections, type Candidate } from './strategy.js';
+import { TrendRadar, type TrendHit } from './trends.js';
 import { Trader } from './trader.js';
 import { Wallet, lamportsToSol, solToLamports } from './wallet.js';
 
@@ -27,6 +28,7 @@ export class Bot {
   private readonly dex = new DexScreenerClient();
   private readonly rug = new RugCheckClient();
   private readonly jup: JupiterClient;
+  readonly trends: TrendRadar | undefined;
   private lastBlockReason = '';
   private stopNoticeShown = false;
 
@@ -47,6 +49,7 @@ export class Bot {
       this.state.walletAddress = wallet.address;
     }
     this.jup = new JupiterClient(cfg.jupiterApiKey, cfg.jupiterRps);
+    this.trends = cfg.trendEnabled ? new TrendRadar(cfg) : undefined;
     this.trader = new Trader(cfg, this.jup, wallet, {
       getPaperBalance: () => BigInt(this.state.paperBalanceLamports),
       setPaperBalance: (v) => {
@@ -243,12 +246,17 @@ export class Bot {
     this.lastBlockReason = '';
 
     const held = new Set(this.state.positions.map((p) => p.mint));
-    const discovered = new Set([...(await this.dex.discoverSolanaTokens()), ...(await this.jup.trendingMints())]);
+    const trendHits: Map<string, TrendHit> = this.trends?.current() ?? new Map();
+    const discovered = new Set<string>(trendHits.keys());
+    if (!this.cfg.trendOnly) {
+      for (const m of await this.dex.discoverSolanaTokens()) discovered.add(m);
+      for (const m of await this.jup.trendingMints()) discovered.add(m);
+    }
     const mints = [...discovered].filter(
       (m) => m !== SOL_MINT && !held.has(m) && !this.state.cooldowns[m] && !this.state.rejected[m],
     );
     if (mints.length === 0) {
-      log.info('Scan: keine neuen Token.');
+      log.info(this.cfg.trendOnly && trendHits.size === 0 ? 'Scan: Trend-Radar hat (noch) keine passenden Token.' : 'Scan: keine neuen Token.');
       return;
     }
 
@@ -256,17 +264,32 @@ export class Bot {
     const candidates: Candidate[] = [];
     let marketRejected = 0;
     for (const [mint, pair] of best) {
-      const reasons = marketRejections(pair, this.cfg);
+      const hit = trendHits.get(mint);
+      const reasons = marketRejections(pair, this.cfg, Date.now(), !!hit);
       if (reasons.length) {
         marketRejected++;
         this.state.rejected[mint] = Date.now() + MARKET_REJECT_MS;
-        log.debug(`${pair.baseToken.symbol}: abgelehnt (Markt): ${reasons.join('; ')}`);
+        const line = `TREND ${pair.baseToken.symbol} (${mint.slice(0, 6)}…, ${hit?.reasons[0]}): abgelehnt (Markt): ${reasons.join('; ')}`;
+        // Eigene Stichwörter (z. B. GTA 6) immer zeigen, allgemeine Trends nur mit DEBUG=true.
+        if (hit && hit.reasons.some((r) => r.startsWith('Stichwort'))) log.info(line);
+        else if (hit) log.debug(line);
+        else log.debug(`${pair.baseToken.symbol}: abgelehnt (Markt): ${reasons.join('; ')}`);
         continue;
       }
-      candidates.push({ mint, symbol: pair.baseToken.symbol, pair, score: candidateScore(pair) });
+      candidates.push({
+        mint,
+        symbol: pair.baseToken.symbol,
+        pair,
+        score: rankedScore(pair, hit?.score ?? 0),
+        trend: hit ? { score: hit.score, reasons: hit.reasons } : undefined,
+      });
     }
-    candidates.sort((a, b) => b.score - a.score);
-    log.info(`Scan: ${mints.length} Token, ${marketRejected} durch Markt-Filter, ${candidates.length} Kandidaten.`);
+    candidates.sort(compareCandidates);
+    const trendCount = candidates.filter((c) => c.trend).length;
+    log.info(
+      `Scan: ${mints.length} Token, ${marketRejected} durch Markt-Filter, ${candidates.length} Kandidaten` +
+        (this.trends ? ` (davon ${trendCount} mit Trend-Bezug).` : '.'),
+    );
 
     const buyLamports = solToLamports(this.cfg.buyAmountSol);
     for (const c of candidates.slice(0, this.cfg.maxSafetyChecksPerScan)) {
@@ -286,10 +309,16 @@ export class Bot {
       log.warn(`${c.symbol}: RugCheck nicht erreichbar (${errMsg(e)}) – übersprungen.`);
       return false;
     }
+    if (isIncompleteReport(report)) {
+      // RugCheck liefert gelegentlich Teilberichte – nicht kaufen, aber bald erneut prüfen.
+      this.state.rejected[c.mint] = Date.now() + MARKET_REJECT_MS;
+      log.info(`${c.symbol} (${c.mint.slice(0, 6)}…): RugCheck-Bericht unvollständig – nicht gekauft, erneute Prüfung in 15 min.`);
+      return false;
+    }
     const safety = safetyRejections(report, this.cfg);
     if (safety.length) {
       this.state.rejected[c.mint] = Date.now() + SAFETY_REJECT_MS;
-      log.info(`${c.symbol}: abgelehnt (Sicherheit): ${safety.join('; ')}`);
+      log.info(`${c.symbol} (${c.mint.slice(0, 6)}…): abgelehnt (Sicherheit): ${safety.join('; ')}`);
       return false;
     }
 
@@ -317,6 +346,7 @@ export class Bot {
         `Vol 1h $${Math.round(p.volume?.h1 ?? 0)}, 1h ${p.priceChange?.h1 ?? '?'}%). Kaufe für ${this.cfg.buyAmountSol} SOL ` +
         `${this.trader.live ? '(LIVE)' : '(Papier)'}…`,
     );
+    if (c.trend) log.info(`${c.symbol}: Trend-Bezug: ${c.trend.reasons.join(' | ')}`);
     let res;
     try {
       res = await this.trader.buy(c.mint, buyLamports);
@@ -350,7 +380,7 @@ export class Bot {
       mint: c.mint,
       sol: lamportsToSol(res.spentLamports),
       tokenRaw: res.tokenRaw.toString(),
-      reason: `Score ${c.score.toFixed(2)}`,
+      reason: `Score ${c.score.toFixed(2)}` + (c.trend ? ` – Trend: ${c.trend.reasons.join(' | ')}` : ''),
       signature: res.signature,
     });
     log.trade(

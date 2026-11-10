@@ -12,10 +12,32 @@ export interface Candidate {
   symbol: string;
   pair: DexPair;
   score: number;
+  /** Gesetzt, wenn der Token zu einem Internet-Trend passt (Trend-Radar). */
+  trend?: { score: number; reasons: string[] };
 }
 
-/** Stufe 1: Marktdaten von DexScreener. */
-export function marketRejections(pair: DexPair, cfg: Config, now = Date.now()): string[] {
+/** Sortierung: Trend-Treffer immer zuerst prüfen, innerhalb der Gruppen nach Score. */
+export function compareCandidates(a: Candidate, b: Candidate): number {
+  const ta = a.trend ? 1 : 0;
+  const tb = b.trend ? 1 : 0;
+  return tb - ta || b.score - a.score;
+}
+
+/** Rangfolge mit Trend-Bonus: Trend-Treffer werden bevorzugt geprüft (Filter bleiben gleich!). */
+export function rankedScore(pair: DexPair, trendScore: number): number {
+  return candidateScore(pair) * (1 + Math.max(0, trendScore));
+}
+
+/**
+ * Stufe 1: Marktdaten von DexScreener.
+ * Für Trend-Treffer (`isTrend`) gelten eine höhere Alters- und Market-Cap-Grenze:
+ * Event-Coins (z. B. GTA 6) entstehen oft Wochen vor dem Ereignis, und ein
+ * etablierter Coin ist sicherer als eine frische Kopie. Alle anderen Filter
+ * (Liquidität, Volumen, Kaufdruck, Mindestalter …) bleiben gleich.
+ */
+export function marketRejections(pair: DexPair, cfg: Config, now = Date.now(), isTrend = false): string[] {
+  const maxAgeHours = isTrend ? Math.max(cfg.maxPairAgeHours, cfg.trendMaxPairAgeHours) : cfg.maxPairAgeHours;
+  const maxMcap = isTrend ? Math.max(cfg.maxMarketCapUsd, cfg.trendMaxMarketCapUsd) : cfg.maxMarketCapUsd;
   const r: string[] = [];
   const liq = pair.liquidity?.usd ?? 0;
   const mcap = pair.marketCap ?? pair.fdv ?? 0;
@@ -26,14 +48,14 @@ export function marketRejections(pair: DexPair, cfg: Config, now = Date.now()): 
   if (pair.chainId !== 'solana') r.push('nicht Solana');
   if (liq < cfg.minLiquidityUsd) r.push(`Liquidität $${Math.round(liq)} < $${cfg.minLiquidityUsd}`);
   if (mcap < cfg.minMarketCapUsd) r.push(`Market Cap $${Math.round(mcap)} < $${cfg.minMarketCapUsd}`);
-  if (mcap > cfg.maxMarketCapUsd) r.push(`Market Cap $${Math.round(mcap)} > $${cfg.maxMarketCapUsd}`);
+  if (mcap > maxMcap) r.push(`Market Cap $${Math.round(mcap)} > $${maxMcap}`);
 
   if (!pair.pairCreatedAt) {
     r.push('Alter des Paares unbekannt');
   } else {
     const ageMin = (now - pair.pairCreatedAt) / 60_000;
     if (ageMin < cfg.minPairAgeMinutes) r.push(`zu jung (${Math.round(ageMin)} min)`);
-    if (ageMin > cfg.maxPairAgeHours * 60) r.push(`zu alt (${Math.round(ageMin / 60)} h)`);
+    if (ageMin > maxAgeHours * 60) r.push(`zu alt (${Math.round(ageMin / 60)} h)`);
   }
 
   if (vol1h < cfg.minVolumeH1Usd) r.push(`Volumen 1h $${Math.round(vol1h)} < $${cfg.minVolumeH1Usd}`);
@@ -90,19 +112,51 @@ export function holderStats(rep: RugReport): HolderStats {
   const maxSinglePct = sorted[0]?.pct ?? 0;
 
   const supply = rep.token?.supply ?? 0;
-  let insiderPct = 0;
+  let networkPct = 0;
   if (supply > 0) {
-    const held = (rep.insiderNetworks ?? []).reduce((s, n) => s + (n.currentHolding ?? 0), 0);
-    insiderPct = (held / supply) * 100;
+    for (const n of rep.insiderNetworks ?? []) {
+      const pct = ((n.currentHolding ?? 0) / supply) * 100;
+      const size = Math.max(1, n.size ?? 1);
+      // Riesige "Netzwerke" (Tausende Wallets) sind meist über Börsen verknüpfte
+      // normale Käufer, keine koordinierte Insider-Gruppe.
+      if (size > MAX_INSIDER_NETWORK_SIZE) continue;
+      // Plausibilität: k Wallets können höchstens so viel halten wie die k größten Holder.
+      // Liefert RugCheck mehr, sind die Daten widersprüchlich (z. B. Pools mitgezählt) -> ignorieren.
+      const bound = maxHoldingOfLargest(sorted, size);
+      if (pct > bound * 1.05 + 0.5) continue;
+      networkPct += Math.min(pct, bound);
+    }
   }
   // Holder, die RugCheck selbst als Insider markiert, zusätzlich berücksichtigen.
   const flagged = holders.filter((h) => h.insider).reduce((s, h) => s + h.pct, 0);
-  insiderPct = Math.max(insiderPct, flagged);
+  const insiderPct = Math.min(100, Math.max(networkPct, flagged));
 
   return { top10Pct, maxSinglePct, insiderPct };
 }
 
+const MAX_INSIDER_NETWORK_SIZE = 100;
+
+/**
+ * Obergrenze dessen, was k Wallets halten können: Summe der k größten bekannten Holder.
+ * RugCheck listet nur die größten ~20 Holder; jede weitere Wallet hält höchstens so viel
+ * wie der kleinste gelistete Holder.
+ */
+export function maxHoldingOfLargest(sortedDesc: { pct: number }[], k: number): number {
+  const listed = sortedDesc.slice(0, k).reduce((s, h) => s + h.pct, 0);
+  const extra = Math.max(0, k - sortedDesc.length) * (sortedDesc[sortedDesc.length - 1]?.pct ?? 0);
+  return listed + extra;
+}
+
 /** Stufe 2: Sicherheitsprüfung mit dem RugCheck-Report. */
+/**
+ * RugCheck liefert gelegentlich Teilberichte (z. B. ohne Holder-Liste oder Token-Daten),
+ * auch für Token, die Minuten vorher vollständig geprüft wurden. Solche Berichte
+ * sind keine Kaufgrundlage, aber auch kein Grund für eine lange Sperre.
+ */
+export function isIncompleteReport(rep: RugReport): boolean {
+  return !rep.token || !rep.topHolders || rep.topHolders.length === 0 || typeof rep.score_normalised !== 'number';
+}
+
 export function safetyRejections(rep: RugReport, cfg: Config): string[] {
   const r: string[] = [];
   const mintAuth = rep.mintAuthority ?? rep.token?.mintAuthority ?? null;

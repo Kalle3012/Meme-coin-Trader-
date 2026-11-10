@@ -17,6 +17,7 @@ Du brauchst **keine Programmierkenntnisse** und musst **keine Dateien von Hand b
 | `2_EINRICHTEN.bat` | Assistent: Phantom-Konto verbinden, Live-Handel ein- und ausschalten |
 | `3_BOT_STARTEN.bat` | Startet den Bot (Fenster offen lassen!) |
 | `STATUS_ANZEIGEN.bat` | Guthaben, offene Positionen, Gewinn/Verlust |
+| `TRENDS_ANZEIGEN.bat` | Zeigt, welche Trends (z. B. GTA 6) und passenden Coins der Bot gerade findet (kauft nichts) |
 | `WALLET_PRUEFEN.bat` | Prüft die Verbindung zum Bot-Konto (handelt nicht) |
 | `KAEUFE_PAUSIEREN.bat` | Bot kauft nichts Neues mehr, verwaltet aber offene Positionen weiter |
 | `KAEUFE_FORTSETZEN.bat` | Hebt die Pause auf |
@@ -116,6 +117,19 @@ Der kostenlose Standard-Zugang zu Solana ist oft überlastet. Besser:
 3. Ab dann handelt der Bot selbstständig. **Jeden Kauf und Verkauf siehst du in Phantom** im Konto „Trading-Bot“.
 
 ---
+
+## Trend-Radar (GTA 6 & Co.)
+
+Der Bot liest automatisch Google News, Google Trends, Wikipedia, CoinGecko und DexScreener
+und **bevorzugt Meme-Coins, die zu aktuellen Trends passen**. Ab Werk sucht er nach **GTA 6**
+(„gta6“, „gta 6“, „gta vi“, „vice city“, „leonida“, „lucia“). Der Release ist für den 19.11.2026 angekündigt.
+
+- **Was findet er gerade?** Doppelklick auf `TRENDS_ANZEIGEN.bat`. Nach ca. 1 Minute siehst du alle
+  Trends, passende Coins mit Chart-Link und ob sie die Prüfungen bestehen (✓) oder nicht (✗).
+- **Stichwörter ändern oder „nur Trend-Coins kaufen“:** `2_EINRICHTEN.bat` → **`6`**.
+- Auch Trend-Coins müssen **alle Sicherheitsprüfungen** bestehen. Es ist normal, dass fast alle
+  GTA-Coins durchfallen: Die meisten sind Kopien, haben kaum Umsatz oder gefälschte Zahlen.
+- ⚠️ Es gibt **keinen offiziellen GTA-6-Coin**. Event-Coins fallen nach dem Ereignis oft stark.
 
 ## Im Alltag
 

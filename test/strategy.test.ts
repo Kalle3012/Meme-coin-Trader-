@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { holderStats, marketRejections, roundtripLossPct, roundtripRejections, safetyRejections } from '../src/strategy.js';
+import { holderStats, isIncompleteReport, marketRejections, maxHoldingOfLargest, roundtripLossPct, roundtripRejections, safetyRejections } from '../src/strategy.js';
 import { NOW, cfg, goodPair, goodReport } from './helpers.js';
 
 describe('Markt-Filter', () => {
@@ -93,11 +93,36 @@ describe('Sicherheits-Filter (RugCheck)', () => {
     assert.ok(r.some((x) => x.includes('größter Holder')));
   });
 
-  it('lehnt große Insider-Netzwerke ab', () => {
-    const rep = goodReport({ insiderNetworks: [{ id: 'x', size: 6, type: 'transfer', currentHolding: 400_000 }] });
-    const s = holderStats(rep);
-    assert.equal(s.insiderPct, 40);
+  it('lehnt echte Insider-Bündel ab (passend zu den Top-Holdern)', () => {
+    const big = [7, 7, 7, 7, 7, 7].map((pct, i) => ({ address: `B${i}`, owner: `BO${i}`, pct }));
+    const rep = goodReport({
+      topHolders: [...big, { address: 'S', owner: 'SO', pct: 1 }],
+      insiderNetworks: [{ id: 'x', size: 6, type: 'transfer', currentHolding: 400_000 }],
+    });
+    assert.equal(holderStats(rep).insiderPct, 40);
     assert.ok(safetyRejections(rep, c).some((x) => x.includes('Insider')));
+  });
+
+  it('ignoriert widersprüchliche Insider-Angaben (Fehlalarm-Schutz)', () => {
+    // 6 Wallets sollen 40 % halten, die 6 größten Holder haben aber nur 12 % -> unmöglich.
+    const rep = goodReport({ insiderNetworks: [{ id: 'x', size: 6, type: 'transfer', currentHolding: 400_000 }] });
+    assert.equal(holderStats(rep).insiderPct, 0);
+  });
+
+  it('ignoriert riesige Netzwerke (über Börsen verknüpfte Käufer)', () => {
+    const rep = goodReport({ insiderNetworks: [{ id: 'x', size: 3444, type: 'transfer', currentHolding: 100_000 }] });
+    assert.equal(holderStats(rep).insiderPct, 0);
+  });
+
+  it('zählt RugCheck-markierte Insider unter den Top-Holdern', () => {
+    const rep = goodReport({ topHolders: [{ address: 'I', owner: 'IO', pct: 6, insider: true }, { address: 'J', owner: 'JO', pct: 1 }] });
+    assert.equal(holderStats(rep).insiderPct, 6);
+  });
+
+  it('berechnet die Obergrenze für k Wallets', () => {
+    const sorted = [{ pct: 5 }, { pct: 3 }, { pct: 1 }];
+    assert.equal(maxHoldingOfLargest(sorted, 2), 8);
+    assert.equal(maxHoldingOfLargest(sorted, 5), 11); // 9 + 2 weitere à max. 1 %
   });
 
   it('lehnt fehlende Holder-Daten ab', () => {
@@ -124,5 +149,14 @@ describe('Honeypot-/Handelbarkeits-Test', () => {
   it('lehnt hohen oder unbekannten Preiseinfluss ab', () => {
     assert.ok(roundtripRejections(100n, 99n, 10, c).some((x) => x.includes('Preiseinfluss')));
     assert.ok(roundtripRejections(100n, 99n, null, c).some((x) => x.includes('unbekannt')));
+  });
+});
+
+describe('Unvollständige RugCheck-Berichte', () => {
+  it('erkennt Teilberichte', () => {
+    assert.equal(isIncompleteReport(goodReport()), false);
+    assert.equal(isIncompleteReport(goodReport({ topHolders: null })), true);
+    assert.equal(isIncompleteReport(goodReport({ topHolders: [] })), true);
+    assert.equal(isIncompleteReport(goodReport({ token: null })), true);
   });
 });

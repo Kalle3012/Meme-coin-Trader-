@@ -53,6 +53,21 @@ export interface RequestOptions {
 }
 
 export async function requestJson<T>(url: string, opts: RequestOptions = {}): Promise<T> {
+  return request(url, opts, 'application/json', (text, status) => {
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new HttpError(`Ungültiges JSON von ${redactUrl(url)}`, status, text.slice(0, 300));
+    }
+  });
+}
+
+/** Wie requestJson, liefert aber den rohen Text (z. B. für RSS/XML-Feeds). */
+export async function requestText(url: string, opts: RequestOptions = {}): Promise<string> {
+  return request(url, opts, 'application/rss+xml, application/xml, text/xml, text/plain, */*', (text) => text);
+}
+
+async function request<T>(url: string, opts: RequestOptions, accept: string, parse: (text: string, status: number) => T): Promise<T> {
   const { method = 'GET', headers = {}, body, timeoutMs = 15_000, limiter } = opts;
   const retries = opts.retries ?? (method === 'GET' ? 3 : 0);
   let lastErr: unknown;
@@ -61,20 +76,14 @@ export async function requestJson<T>(url: string, opts: RequestOptions = {}): Pr
     const doFetch = () =>
       fetch(url, {
         method,
-        headers: { accept: 'application/json', ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...headers },
+        headers: { accept, ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...headers },
         body: body !== undefined ? JSON.stringify(body) : undefined,
         signal: AbortSignal.timeout(timeoutMs),
       });
     try {
       const res = limiter ? await limiter.schedule(doFetch) : await doFetch();
       const text = await res.text();
-      if (res.ok) {
-        try {
-          return JSON.parse(text) as T;
-        } catch {
-          throw new HttpError(`Ungültiges JSON von ${redactUrl(url)}`, res.status, text.slice(0, 300));
-        }
-      }
+      if (res.ok) return parse(text, res.status);
       const err = new HttpError(`HTTP ${res.status} von ${redactUrl(url)}: ${text.slice(0, 300)}`, res.status, text);
       if (res.status === 429 || res.status >= 500) {
         lastErr = err;

@@ -12,6 +12,7 @@
     "einrichten": "tsx src/scripts/setup-wizard.ts",
     "check-wallet": "tsx src/scripts/check-wallet.ts",
     "status": "tsx src/scripts/status.ts",
+    "trends": "tsx src/scripts/trends.ts",
     "sell-all": "tsx src/scripts/sell-all.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts"

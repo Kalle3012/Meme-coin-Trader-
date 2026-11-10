@@ -11,6 +11,8 @@ dotenv.config({ quiet: true });
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
 export const LAMPORTS_PER_SOL = 1_000_000_000;
 export const LIVE_CONFIRM_PHRASE = 'ICH_VERSTEHE_DAS_RISIKO';
+/** GTA 6: Titel, Schreibweisen, Spielort (Vice City im Bundesstaat Leonida) und Hauptfigur Lucia. */
+export const DEFAULT_TREND_KEYWORDS = 'gta6,gta 6,gta vi,vice city,leonida,lucia';
 
 export interface Config {
   // Wallet & Verbindung
@@ -66,6 +68,17 @@ export interface Config {
   trailingActivationPct: number;
   maxHoldMinutes: number;
 
+  // Trend-Radar
+  trendEnabled: boolean;
+  trendKeywords: string[];
+  trendOnly: boolean;
+  trendInternetSources: boolean;
+  trendGeos: string[];
+  trendRefreshMin: number;
+  trendMaxSearches: number;
+  trendMaxPairAgeHours: number;
+  trendMaxMarketCapUsd: number;
+
   // Timing
   scanIntervalSec: number;
   positionCheckIntervalSec: number;
@@ -93,6 +106,11 @@ function bool(env: Env, key: string, def: boolean): boolean {
   if (['true', '1', 'yes', 'ja'].includes(raw)) return true;
   if (['false', '0', 'no', 'nein'].includes(raw)) return false;
   throw new ConfigError(`${key} muss true oder false sein (ist "${env[key]}")`);
+}
+
+function list(env: Env, key: string, def: string): string[] {
+  const raw = env[key] ?? def;
+  return [...new Set(raw.split(',').map((x) => x.trim().toLowerCase()).filter((x) => x.length > 0))];
 }
 
 function str(env: Env, key: string): string | undefined {
@@ -151,11 +169,29 @@ export function loadConfig(env: Env = process.env): Config {
     trailingActivationPct: num(env, 'TRAILING_ACTIVATION_PCT', 25, { min: 0 }),
     maxHoldMinutes: num(env, 'MAX_HOLD_MINUTES', 180, { min: 1 }),
 
+    trendEnabled: bool(env, 'TREND_ENABLED', true),
+    trendKeywords: list(env, 'TREND_KEYWORDS', DEFAULT_TREND_KEYWORDS),
+    trendOnly: bool(env, 'TREND_ONLY', false),
+    trendInternetSources: bool(env, 'TREND_INTERNET_SOURCES', true),
+    trendGeos: list(env, 'TREND_GEOS', 'US,DE').map((g) => g.toUpperCase()),
+    trendRefreshMin: num(env, 'TREND_REFRESH_MIN', 15, { min: 5 }),
+    trendMaxSearches: num(env, 'TREND_MAX_SEARCHES', 25, { min: 1, max: 100, int: true }),
+    trendMaxPairAgeHours: num(env, 'TREND_MAX_PAIR_AGE_HOURS', 2160, { min: 1 }),
+    trendMaxMarketCapUsd: num(env, 'TREND_MAX_MARKET_CAP_USD', 50_000_000, { min: 0 }),
+
     scanIntervalSec: num(env, 'SCAN_INTERVAL_SEC', 60, { min: 15 }),
     positionCheckIntervalSec: num(env, 'POSITION_CHECK_INTERVAL_SEC', 15, { min: 5 }),
     maxSafetyChecksPerScan: num(env, 'MAX_SAFETY_CHECKS_PER_SCAN', 4, { min: 1, max: 20, int: true }),
     rebuyCooldownHours: num(env, 'REBUY_COOLDOWN_HOURS', 24, { min: 0 }),
   };
+
+  for (const kw of cfg.trendKeywords) {
+    if (kw.replace(/[^a-z0-9]/g, '').length < 3) throw new ConfigError(`TREND_KEYWORDS: "${kw}" ist zu kurz (mind. 3 Buchstaben/Ziffern)`);
+  }
+  for (const g of cfg.trendGeos) {
+    if (!/^[A-Z]{2}$/.test(g)) throw new ConfigError(`TREND_GEOS: "${g}" ist kein Ländercode (z. B. US, DE)`);
+  }
+  if (cfg.trendOnly && !cfg.trendEnabled) throw new ConfigError('TREND_ONLY=true erfordert TREND_ENABLED=true');
 
   if (cfg.minMarketCapUsd > cfg.maxMarketCapUsd) {
     throw new ConfigError('MIN_MARKET_CAP_USD darf nicht größer als MAX_MARKET_CAP_USD sein');

@@ -4,7 +4,7 @@ import readline from 'node:readline/promises';
 import { Connection, PublicKey } from '@solana/web3.js';
 import bs58 from 'bs58';
 import dotenv from 'dotenv';
-import { ConfigError, LIVE_CONFIRM_PHRASE, loadConfig } from '../config.js';
+import { ConfigError, DEFAULT_TREND_KEYWORDS, LIVE_CONFIRM_PHRASE, loadConfig } from '../config.js';
 import { setEnvValues } from '../envfile.js';
 import { lamportsToSol, loadKeypair } from '../wallet.js';
 
@@ -131,6 +131,12 @@ function showStatus(): void {
   console.log(` RPC:            ${rpcHost}`);
   console.log(` Jupiter-Key:    ${env.JUPITER_API_KEY ? 'gesetzt' : 'nicht gesetzt (optional)'}`);
   console.log(` Kaufbetrag:     ${env.BUY_AMOUNT_SOL || '0.05'} SOL, max. ${env.MAX_OPEN_POSITIONS || '3'} Positionen`);
+  const trendOn = env.TREND_ENABLED?.trim().toLowerCase() !== 'false';
+  const trendOnly = env.TREND_ONLY?.trim().toLowerCase() === 'true';
+  console.log(
+    ` Trend-Radar:    ${trendOn ? (trendOnly ? 'an – kauft NUR Trend-Coins' : 'an') : 'aus'}` +
+      (trendOn ? ` (${env.TREND_KEYWORDS?.trim() || DEFAULT_TREND_KEYWORDS})` : ''),
+  );
   console.log('----------------------------------------------');
 }
 
@@ -280,6 +286,37 @@ async function enableLive(): Promise<void> {
   console.log('✔ LIVE-Handel ist eingeschaltet. Starte den Bot mit 3_BOT_STARTEN.bat bzw. "npm start".');
 }
 
+async function configureTrends(): Promise<void> {
+  console.log('\n=== Trend-Radar ===');
+  console.log('Der Bot durchsucht Google News, Google Trends, Wikipedia, CoinGecko und DexScreener');
+  console.log('und bevorzugt Meme-Coins, die zu aktuellen Trends und deinen Stichwörtern passen.');
+  console.log('Alle Sicherheitsprüfungen gelten trotzdem – Trend-Coins sind oft Kopien oder Betrug.\n');
+  const env = currentEnv();
+  const on = await askYesNo('Trend-Radar einschalten?');
+  if (!on) {
+    save({ TREND_ENABLED: 'false', TREND_ONLY: 'false' });
+    console.log('✔ Trend-Radar ausgeschaltet.');
+    return;
+  }
+  const current = env.TREND_KEYWORDS?.trim() || DEFAULT_TREND_KEYWORDS;
+  console.log(`\nAktuelle Stichwörter: ${current}`);
+  console.log('Neue Stichwörter mit Komma getrennt eingeben (z. B. gta6,gta 6,vice city). Enter = unverändert.');
+  const kws = await ask('Stichwörter: ');
+  const only = await askYesNo('NUR Trend-Coins kaufen (alle anderen ignorieren)?');
+  const values: Record<string, string> = { TREND_ENABLED: 'true', TREND_ONLY: only ? 'true' : 'false' };
+  if (kws) {
+    values.TREND_KEYWORDS = [...new Set(kws.split(',').map((k) => k.trim().toLowerCase().replace(/\s+/g, ' ')).filter(Boolean))].join(',');
+  }
+  try {
+    loadConfig({ ...env, ...values });
+  } catch (e) {
+    console.log(`-> ${e instanceof ConfigError ? e.message : String(e)}\n   Nichts gespeichert.`);
+    return;
+  }
+  save(values);
+  console.log('✔ Trend-Radar gespeichert. Mit TRENDS_ANZEIGEN.bat bzw. "npm run trends" siehst du, was er findet.');
+}
+
 async function enablePaper(): Promise<void> {
   save({ DRY_RUN: 'true', LIVE_TRADING_CONFIRM: null });
   console.log('✔ Papiermodus eingeschaltet (kein echtes Geld).');
@@ -298,6 +335,7 @@ async function main(): Promise<void> {
     console.log(' [3] LIVE-Handel einschalten (echtes Geld)');
     console.log(' [4] Zurück in den Papiermodus');
     console.log(' [5] Wallet-Verbindung entfernen');
+    console.log(' [6] Trend-Radar einstellen (z. B. GTA 6)');
     console.log(' [0] Beenden');
     const choice = await ask('Auswahl: ');
     switch (choice) {
@@ -319,13 +357,16 @@ async function main(): Promise<void> {
           console.log('✔ Wallet entfernt, Papiermodus aktiv.');
         }
         break;
+      case '6':
+        await configureTrends();
+        break;
       case '':
         break;
       case '0':
         console.log('Einstellungen gespeichert in .env. Tschüss!');
         return;
       default:
-        console.log('Bitte 0–5 eingeben.');
+        console.log('Bitte 0–6 eingeben.');
     }
   }
 }

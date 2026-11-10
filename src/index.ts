@@ -24,6 +24,13 @@ async function main(): Promise<void> {
   log.info(`${cfg.dryRun ? 'Papier-Guthaben' : 'SOL-Guthaben'}: ${lamportsToSol(balance).toFixed(4)} SOL`);
   if (bot.state.positions.length) log.info(`${bot.state.positions.length} offene Position(en) aus dem letzten Lauf werden weiter verwaltet.`);
 
+  if (bot.trends) {
+    log.info(
+      `Trend-Radar aktiv${cfg.trendOnly ? ' (NUR Trend-Token werden gekauft)' : ''}. Stichwörter: ${cfg.trendKeywords.join(', ')}`,
+    );
+    await bot.trends.refresh().catch((e) => log.warn(`Trend-Radar: erste Abfrage fehlgeschlagen: ${errMsg(e)}`));
+  }
+
   if (!cfg.dryRun) {
     log.warn('LIVE-MODUS: Der Bot handelt in 15 Sekunden mit echtem Geld. Abbrechen mit Strg+C.');
     for (let i = 15; i > 0; i--) {
@@ -34,12 +41,16 @@ async function main(): Promise<void> {
   }
 
   let stopping = false;
+  let firstSignalAt = 0;
   const shutdown = () => {
     if (stopping) {
+      // npm/tsx leiten Strg+C teils doppelt weiter – nur ein bewusstes zweites Strg+C zählt.
+      if (Date.now() - firstSignalAt < 2000) return;
       log.warn('Sofortiges Beenden.');
       process.exit(1);
     }
     stopping = true;
+    firstSignalAt = Date.now();
     log.info('Beende nach dem aktuellen Schritt … (nochmal Strg+C = sofort)');
     bot.stop();
   };

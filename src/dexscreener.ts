@@ -30,6 +30,16 @@ export interface DexPair {
   } | null;
 }
 
+export interface DexMeta {
+  name: string;
+  slug: string;
+  description?: string;
+  marketCap?: number;
+  volume?: number;
+  tokenCount?: number;
+  marketCapChange?: Record<string, number>;
+}
+
 interface TokenListEntry {
   chainId: string;
   tokenAddress: string;
@@ -54,6 +64,28 @@ export class DexScreenerClient {
       }
     }
     return [...seen];
+  }
+
+  /** Volltextsuche (Name/Symbol). Liefert höchstens ~30 Paare, nur Solana werden behalten. */
+  async search(query: string): Promise<DexPair[]> {
+    const res = await requestJson<{ pairs?: DexPair[] | null }>(`${BASE}/latest/dex/search?q=${encodeURIComponent(query)}`, {
+      limiter: this.limiter,
+    });
+    return (res.pairs ?? []).filter((p) => p?.chainId === 'solana');
+  }
+
+  /** Aktuell trendende "Metas" (Narrative wie Cat, AI, Celebrity …). */
+  async trendingMetas(): Promise<DexMeta[]> {
+    const res = await requestJson<DexMeta[]>(`${BASE}/metas/trending/v1`, { limiter: this.limiter });
+    return Array.isArray(res) ? res : [];
+  }
+
+  /** Paare einer Meta (nur Solana). */
+  async metaPairs(slug: string): Promise<DexPair[]> {
+    const res = await requestJson<{ pairs?: DexPair[] | null }>(`${BASE}/metas/meta/v1/${encodeURIComponent(slug)}`, {
+      limiter: this.limiter,
+    });
+    return (res.pairs ?? []).filter((p) => p?.chainId === 'solana');
   }
 
   /** Paare zu bis zu 30 Token-Adressen pro Anfrage. */

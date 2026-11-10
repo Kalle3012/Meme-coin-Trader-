@@ -34,10 +34,11 @@ Trailing-Stop oder Zeitlimit.
 4. [Live-Handel aktivieren](#4-live-handel-aktivieren)
 5. [Befehle](#5-befehle)
 6. [So entscheidet der Bot](#6-so-entscheidet-der-bot)
-7. [Einstellungen](#7-einstellungen)
-8. [Recherche: Vorlagen & Erfahrungen](#8-recherche-vorlagen--erfahrungen)
-9. [Grenzen & bekannte Risiken](#9-grenzen--bekannte-risiken)
-10. [Steuern (Deutschland)](#10-steuern-deutschland)
+7. [Trend-Radar (z. B. GTA 6)](#7-trend-radar-z-b-gta-6)
+8. [Einstellungen](#8-einstellungen)
+9. [Recherche: Vorlagen & Erfahrungen](#9-recherche-vorlagen--erfahrungen)
+10. [Grenzen & bekannte Risiken](#10-grenzen--bekannte-risiken)
+11. [Steuern (Deutschland)](#11-steuern-deutschland)
 
 ---
 
@@ -144,17 +145,19 @@ kleinen VPS (Linux-Server), z. B. mit `pm2` oder `screen`.
 | `npm run einrichten` | Einrichtungsassistent: Wallet verbinden, RPC/Jupiter-Key, Live/Papier umschalten |
 | Strg+C | Bot sauber beenden. Offene Positionen bleiben offen und werden beim nächsten Start weiter verwaltet. |
 | `npm run status` | Guthaben, offene Positionen und Statistik anzeigen |
+| `npm run trends` | Zeigt, was der Trend-Radar im Internet findet und wie die Coins bei den Filtern abschneiden (kauft nichts) |
 | `npm run check-wallet` | Wallet-Verbindung prüfen (ohne zu handeln) |
 | `npm run sell-all` | Notverkauf aller Positionen. Im Live-Modus: `npm run sell-all -- --ja` (Bot vorher beenden) |
 | Datei `STOP` im Projektordner anlegen | Bot kauft nichts mehr, verwaltet aber bestehende Positionen weiter. Datei löschen = weiter kaufen. |
-| `npm test` | 58 automatische Tests (Entscheidungslogik, Konfiguration, Wallet-Import, .env-Bearbeitung) |
+| `npm test` | 82 automatische Tests (Entscheidungslogik, Trend-Radar, Konfiguration, Wallet-Import, .env-Bearbeitung) |
 
 ## 6. So entscheidet der Bot
 
 Jede Minute läuft ein Scan in drei Prüfstufen. Ein Token wird nur gekauft, wenn er **alle** besteht:
 
-**Stufe 0: Token finden.** Quellen sind DexScreener (neue Token-Profile und Boosts) und die
-Jupiter Tokens API (Trending und hoher „Organic Score“, also echte Nutzer statt Bot-Volumen).
+**Stufe 0: Token finden.** Quellen sind DexScreener (neue Token-Profile und Boosts), die Jupiter
+Tokens API (Trending und hoher „Organic Score“) und der **Trend-Radar** (Abschnitt 7). Trend-Treffer
+werden zuerst geprüft.
 
 **Stufe 1: Marktdaten (DexScreener).**
 - Liquidität ≥ 25.000 $, Market Cap zwischen 75.000 $ und 10 Mio. $
@@ -199,13 +202,48 @@ und reicht sie über `/execute` ein. Danach prüft er **on-chain**, wie viele To
 tatsächlich angekommen sind, statt nur der API-Antwort zu vertrauen. Der Zustand wird nach jeder
 Änderung gespeichert, damit nach einem Absturz keine Position verloren geht.
 
-## 7. Einstellungen
+## 7. Trend-Radar (z. B. GTA 6)
+
+Der Bot liest frei zugängliche Trend-Quellen und bevorzugt Meme-Coins, die zu aktuellen Themen passen.
+Alle Quellen wurden im November 2026 live getestet, keine braucht einen API-Key:
+
+| Quelle | Was sie liefert |
+|---|---|
+| **Deine Stichwörter + Google News** | Für jedes Stichwort (Standard: GTA 6) die Anzahl der News-Artikel in 24 h. Je mehr Hype, desto höher das Gewicht. |
+| **Google Trends** | Die täglich am stärksten steigenden Suchbegriffe (USA und Deutschland) |
+| **Wikipedia** | Die meistgelesenen Artikel des Vortags |
+| **CoinGecko** | Die aktuell meistgesuchten Coins |
+| **DexScreener-Narrative** | Trendende Meme-Themen (z. B. Cat, AI, Celebrity) und deren Token |
+
+Reddit blockiert automatische Abfragen, X/Twitter ist kostenpflichtig. Beide sind daher nicht dabei.
+
+**So arbeitet der Radar:**
+1. Alle 15 Minuten werden die Trend-Themen neu abgefragt. Das läuft im Hintergrund, Positionen werden weiter überwacht.
+2. Zu jedem Thema sucht der Bot passende Solana-Token. Eigene Stichwörter passen auch als Teil des Namens, allgemeine Trends nur bei exakter Übereinstimmung.
+3. **Schutz vor Kopien:** Zu jedem Thema gibt es oft Dutzende Kopien („GTA VI“, „GTA 6 Coin“ …). Pro Thema zählen nur die 3 liquidesten Token.
+4. Trend-Treffer werden **zuerst** geprüft. Mit `TREND_ONLY=true` kauft der Bot ausschließlich Trend-Coins.
+5. **Alle Sicherheitsprüfungen bleiben unverändert.** Gelockert sind für Trend-Coins nur das Höchstalter (90 statt 3 Tage) und die maximale Market Cap (50 statt 10 Mio. $). Event-Coins entstehen oft Wochen vor dem Ereignis, und ein etablierter Coin ist sicherer als eine frische Kopie.
+
+**Was die Live-Tests gezeigt haben (10.11.2026):**
+- Die Suche „gta6“ liefert Dutzende Token mit demselben Namen. Einer meldete eine Market Cap von 12 Milliarden $ bei 0 Umsatz, also offensichtlich gefälschte Daten. Der Markt-Filter lehnte ihn ab.
+- Mehrere CoinGecko-Trends („Super Inu“, „Akedo“) hatten auf Solana gefälschte Kopien mit Liquidität ≈ Market Cap und 0–2 Transaktionen. Alle wurden abgelehnt.
+- RugCheck liefert manchmal widersprüchliche Insider-Daten: 11 Wallets sollen 25,7 % halten, obwohl die 11 größten Holder zusammen nur 15,6 % besitzen. Solche unmöglichen Angaben werden ignoriert. Echte Bündel, die zu den Top-Holdern passen, werden weiter abgelehnt.
+- RugCheck liefert gelegentlich unvollständige Berichte. Dann kauft der Bot nicht und prüft nach 15 Minuten erneut.
+
+**Bekannte GTA-6-Risiken:**
+- Rockstar und Take-Two haben **keinen** offiziellen GTA-6-Token. Alles, was sich als „offiziell“ ausgibt, ist Betrug.
+- Im August 2026 verkaufte eine Wallet hinter dem Leak-Token „CyberLeek“ kurz vor Rockstars offiziellem Showcase einen großen Token-Posten (Rug-Pull-Vorwürfe, ca. 270.000 $).
+- Event-Coins steigen oft **vor** dem Ereignis und fallen danach („Sell the News“). Der Release ist für den **19.11.2026** angekündigt. Der Trailing-Stop sichert Gewinne, kann einen schnellen Absturz aber nicht verhindern.
+
+Was der Radar gerade findet, zeigt `npm run trends` (Windows: `TRENDS_ANZEIGEN.bat`). Der Befehl kauft nichts.
+
+## 8. Einstellungen
 
 Alle Parameter stehen kommentiert in [`.env.example`](.env.example). Jeder Wert wird beim Start
 geprüft. Unsinnige Werte (z. B. Stop-Loss 0 %, Text statt Zahl) führen zu einer klaren
 Fehlermeldung statt zu falschen Trades.
 
-## 8. Recherche: Vorlagen & Erfahrungen
+## 9. Recherche: Vorlagen & Erfahrungen
 
 Vor der Entwicklung wurden Open-Source-Projekte, offizielle API-Dokumentationen und Berichte aus
 Krypto-Medien und von Sicherheitsfirmen ausgewertet. Die Kernergebnisse:
@@ -242,7 +280,7 @@ ein separates Konto mit wenig Geld.
 - RugCheck (`api.rugcheck.xyz/v1/tokens/{mint}/report`)
 - `@solana/web3.js` v3 (aktuelle Version mit asynchroner Signatur)
 
-## 9. Grenzen & bekannte Risiken
+## 10. Grenzen & bekannte Risiken
 
 - **Keine Gewinngarantie.** Auch Token, die alle Prüfungen bestehen, können abstürzen oder später
   manipuliert werden. RugCheck & Co. erkennen nicht jeden Betrug.
@@ -258,7 +296,7 @@ ein separates Konto mit wenig Geld.
   Jupiter-Transaktionen wurden dekodiert und geprüft. Ein echter Swap mit Geld wurde bei der
   Entwicklung nicht ausgeführt. Starte deshalb mit sehr kleinen Beträgen.
 
-## 10. Steuern (Deutschland)
+## 11. Steuern (Deutschland)
 
 Gewinne aus Kryptowährungen, die du **weniger als ein Jahr** hältst, sind in Deutschland als private
 Veräußerungsgeschäfte steuerpflichtig. Es gilt eine Freigrenze von 1.000 € pro Jahr (seit 2024).
