@@ -5,6 +5,8 @@ prüft sie auf Betrug (Rug-Pull, Honeypot, Wal-Konzentration), kauft über **Jup
 (den größten Solana-DEX-Aggregator) und verkauft automatisch per Stop-Loss, Take-Profit,
 Trailing-Stop oder Zeitlimit.
 
+> ### 👉 Einsteiger: Die einfache Schritt-für-Schritt-Anleitung mit Doppelklick-Dateien für Windows steht in **[ANLEITUNG.md](ANLEITUNG.md)**.
+
 > ## ⚠️ Bitte zuerst lesen
 >
 > - **Meme-Coins sind extrem riskant.** Auswertungen der Plattform Pump.fun zeigen, dass die
@@ -65,7 +67,7 @@ Gesperrt ist Folgendes, und der Bot verweigert dann den Start:
 
 ## 2. Installation
 
-Voraussetzung: **Node.js 20 oder neuer** ([nodejs.org](https://nodejs.org), „LTS“ wählen).
+Voraussetzung: **Node.js 22 oder neuer** ([nodejs.org](https://nodejs.org), „LTS“ wählen).
 
 ```bash
 git clone https://github.com/kalle3012/meme-coin-trader-.git
@@ -109,7 +111,9 @@ fehlgeschlagene Transaktionen und schnellere Kursbewegungen dazu.
 Erst wenn du den Papiermodus ausgewertet hast:
 
 1. Bot-Konto in Phantom anlegen und aufladen (siehe Abschnitt 1).
-2. In `.env` eintragen:
+2. Den Einrichtungsassistenten starten: `npm run einrichten` (Windows: `2_EINRICHTEN.bat`).
+   Er fragt Adresse und privaten Schlüssel ab (die Eingabe bleibt unsichtbar), prüft, ob beide
+   zusammenpassen, und speichert sie in `.env`. Alternativ trägst du sie von Hand ein:
    ```ini
    PRIVATE_KEY=<privater Schlüssel des Bot-Kontos>
    EXPECTED_WALLET_ADDRESS=<öffentliche Adresse des Bot-Kontos>
@@ -119,7 +123,7 @@ Erst wenn du den Papiermodus ausgewertet hast:
    npm run check-wallet
    ```
    Die angezeigte Adresse muss mit dem Bot-Konto in Phantom übereinstimmen.
-4. Live schalten:
+4. Live schalten, im Assistenten mit Menüpunkt 3 oder von Hand in `.env`:
    ```ini
    DRY_RUN=false
    LIVE_TRADING_CONFIRM=ICH_VERSTEHE_DAS_RISIKO
@@ -137,12 +141,13 @@ kleinen VPS (Linux-Server), z. B. mit `pm2` oder `screen`.
 | Befehl | Wirkung |
 |---|---|
 | `npm start` | Bot starten |
+| `npm run einrichten` | Einrichtungsassistent: Wallet verbinden, RPC/Jupiter-Key, Live/Papier umschalten |
 | Strg+C | Bot sauber beenden. Offene Positionen bleiben offen und werden beim nächsten Start weiter verwaltet. |
 | `npm run status` | Guthaben, offene Positionen und Statistik anzeigen |
 | `npm run check-wallet` | Wallet-Verbindung prüfen (ohne zu handeln) |
 | `npm run sell-all` | Notverkauf aller Positionen. Im Live-Modus: `npm run sell-all -- --ja` (Bot vorher beenden) |
 | Datei `STOP` im Projektordner anlegen | Bot kauft nichts mehr, verwaltet aber bestehende Positionen weiter. Datei löschen = weiter kaufen. |
-| `npm test` | 51 automatische Tests der Entscheidungslogik |
+| `npm test` | 58 automatische Tests (Entscheidungslogik, Konfiguration, Wallet-Import, .env-Bearbeitung) |
 
 ## 6. So entscheidet der Bot
 

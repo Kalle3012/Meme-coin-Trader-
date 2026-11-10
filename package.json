@@ -5,10 +5,11 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "start": "tsx src/index.ts",
+    "einrichten": "tsx src/scripts/setup-wizard.ts",
     "check-wallet": "tsx src/scripts/check-wallet.ts",
     "status": "tsx src/scripts/status.ts",
     "sell-all": "tsx src/scripts/sell-all.ts",
