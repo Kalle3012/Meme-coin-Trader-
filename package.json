@@ -1,0 +1,29 @@
+{
+  "name": "meme-coin-trader",
+  "version": "1.0.0",
+  "description": "Automatischer Solana Meme-Coin-Trader (Phantom-Wallet-kompatibel) mit Paper-Trading, Rug-Checks und Risiko-Limits",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "check-wallet": "tsx src/scripts/check-wallet.ts",
+    "status": "tsx src/scripts/status.ts",
+    "sell-all": "tsx src/scripts/sell-all.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@solana/web3.js": "3.2.0",
+    "bs58": "6.0.0",
+    "dotenv": "18.0.10"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "tsx": "4.23.15",
+    "typescript": "6.0.2"
+  }
+}
