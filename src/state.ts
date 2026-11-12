@@ -22,6 +22,8 @@ export interface Position {
   buySignature?: string;
   sellFailures?: number;
   quoteFailures?: number;
+  /** "early" = über den Frühphasen-Radar gekauft (eigenes Risikoprofil). */
+  profile?: 'normal' | 'early';
 }
 
 export interface DayStats {

@@ -4,7 +4,8 @@ import { DexScreenerClient, bestPairPerToken } from './dexscreener.js';
 import { sleep } from './http.js';
 import { JupiterClient, isNoRouteError, priceImpactPercent } from './jupiter.js';
 import { errMsg, log } from './logger.js';
-import { blockNewPositionReason, decideExit } from './risk.js';
+import { EarlyRadar, type EarlyCandidate } from './early.js';
+import { blockNewPositionReason, decideExit, profileParams, type Profile } from './risk.js';
 import { RugCheckClient } from './rugcheck.js';
 import { type BotState, type Position, StateStore, TradeJournal, pruneLists, rollDay } from './state.js';
 import { compareCandidates, isIncompleteReport, marketRejections, rankedScore, roundtripRejections, safetyRejections, type Candidate } from './strategy.js';
@@ -29,7 +30,9 @@ export class Bot {
   private readonly rug = new RugCheckClient();
   private readonly jup: JupiterClient;
   readonly trends: TrendRadar | undefined;
+  readonly early: EarlyRadar | undefined;
   private lastBlockReason = '';
+  private lastEarlyBlockReason = '';
   private stopNoticeShown = false;
 
   constructor(
@@ -50,6 +53,7 @@ export class Bot {
     }
     this.jup = new JupiterClient(cfg.jupiterApiKey, cfg.jupiterRps);
     this.trends = cfg.trendEnabled ? new TrendRadar(cfg) : undefined;
+    this.early = cfg.earlyEnabled ? new EarlyRadar(cfg, this.jup, this.trends) : undefined;
     this.trader = new Trader(cfg, this.jup, wallet, {
       getPaperBalance: () => BigInt(this.state.paperBalanceLamports),
       setPaperBalance: (v) => {
@@ -60,6 +64,7 @@ export class Bot {
 
   stop(): void {
     this.running = false;
+    this.early?.stop();
   }
 
   private save(): void {
@@ -70,6 +75,8 @@ export class Bot {
     this.running = true;
     let nextScan = 0;
     let nextCheck = 0;
+    let nextEarly = Date.now() + 20_000; // Stream erst ein paar Coins sammeln lassen
+    this.early?.start();
     while (this.running) {
       const now = Date.now();
       if (rollDay(this.state, now)) log.info(`Neuer Tag ${this.state.day.date}: Tageszähler zurückgesetzt.`);
@@ -83,9 +90,14 @@ export class Bot {
         await this.safe('Markt-Scan', () => this.scanAndMaybeBuy());
         nextScan = Date.now() + this.cfg.scanIntervalSec * 1000;
       }
+      if (this.early && this.running && Date.now() >= nextEarly) {
+        await this.safe('Frühphasen-Radar', () => this.earlyTick());
+        nextEarly = Date.now() + this.cfg.earlyEvalIntervalSec * 1000;
+      }
       this.save();
       for (let i = 0; i < 10 && this.running; i++) await sleep(100);
     }
+    this.early?.stop();
     this.save();
   }
 
@@ -228,13 +240,18 @@ export class Bot {
 
   // ---------------------------------------------------------------- Scan & Kauf
 
-  async scanAndMaybeBuy(): Promise<void> {
+  private buyingPaused(): boolean {
     if (fs.existsSync(STOP_FILE)) {
       if (!this.stopNoticeShown) log.warn(`Datei "${STOP_FILE}" gefunden: keine neuen Käufe. Bestehende Positionen werden weiter verwaltet.`);
       this.stopNoticeShown = true;
-      return;
+      return true;
     }
     this.stopNoticeShown = false;
+    return false;
+  }
+
+  async scanAndMaybeBuy(): Promise<void> {
+    if (this.buyingPaused()) return;
 
     const balance = await this.trader.solBalance();
     const block = blockNewPositionReason(this.state, balance, this.cfg);
@@ -294,14 +311,76 @@ export class Bot {
     const buyLamports = solToLamports(this.cfg.buyAmountSol);
     for (const c of candidates.slice(0, this.cfg.maxSafetyChecksPerScan)) {
       if (!this.running) return;
-      const ok = await this.passesSafety(c, buyLamports);
+      const ok = await this.passesSafety(c.mint, c.symbol, buyLamports, 'normal');
       if (!ok) continue;
-      await this.openPosition(c, buyLamports);
+      const p = c.pair;
+      await this.openPosition({
+        mint: c.mint,
+        symbol: c.symbol,
+        profile: 'normal',
+        buyLamports,
+        summary:
+          `Liq $${Math.round(p.liquidity?.usd ?? 0)}, MCap $${Math.round(p.marketCap ?? 0)}, ` +
+          `Vol 1h $${Math.round(p.volume?.h1 ?? 0)}, 1h ${p.priceChange?.h1 ?? '?'}%`,
+        details: c.trend ? `Trend-Bezug: ${c.trend.reasons.join(' | ')}` : undefined,
+        journalReason: `Score ${c.score.toFixed(2)}` + (c.trend ? ` – Trend: ${c.trend.reasons.join(' | ')}` : ''),
+        link: `https://dexscreener.com/solana/${p.pairAddress}`,
+      });
       return; // höchstens ein Kauf pro Scan
     }
   }
 
-  private async passesSafety(c: Candidate, buyLamports: bigint): Promise<boolean> {
+  // ---------------------------------------------------------------- Frühphase
+
+  async earlyTick(): Promise<void> {
+    if (!this.early) return;
+    const candidates = await this.early.evaluate();
+    const top = this.early.snapshot()[0];
+    log.info(
+      `Frühphase: ${this.early.size} neue Coins unter Beobachtung (${this.early.streamedCount} per Echtzeit-Stream), ` +
+        `${candidates.length} über Score ${this.cfg.earlyMinScore}` +
+        (top?.score ? ` – bester: ${top.symbol} ${top.score.total}/100` : '') +
+        '.',
+    );
+    if (candidates.length === 0 || this.buyingPaused()) return;
+
+    const balance = await this.trader.solBalance();
+    const block = blockNewPositionReason(this.state, balance, this.cfg, 'early');
+    if (block) {
+      if (block !== this.lastEarlyBlockReason) log.info(`Frühphase – keine neuen Käufe: ${block}`);
+      this.lastEarlyBlockReason = block;
+      return;
+    }
+    this.lastEarlyBlockReason = '';
+
+    const held = new Set(this.state.positions.map((p) => p.mint));
+    const buyLamports = solToLamports(this.cfg.earlyBuyAmountSol);
+    for (const c of candidates.slice(0, 2)) {
+      if (!this.running) return;
+      if (held.has(c.mint) || this.state.cooldowns[c.mint] || this.state.rejected[c.mint]) continue;
+      log.info(`FRÜHPHASE ${c.symbol} (${c.mint.slice(0, 6)}…): Score ${fmtScore(c)} – ${c.score.reasons.join(', ') || 'keine Besonderheiten'}`);
+      const ok = await this.passesSafety(c.mint, c.symbol, buyLamports, 'early');
+      if (!ok) continue;
+      await this.openPosition({
+        mint: c.mint,
+        symbol: c.symbol,
+        profile: 'early',
+        buyLamports,
+        summary:
+          `Alter ${c.ageMin.toFixed(0)} min, MCap $${Math.round(c.token.mcap ?? 0)}, Liq $${Math.round(c.token.liquidity ?? 0)}, ` +
+          `${c.token.holderCount ?? 0} Holder, Potenzial-Score ${c.score.total}/100`,
+        details: c.score.reasons.length ? `Gründe: ${c.score.reasons.join(' | ')}` : undefined,
+        journalReason: `Frühphase Score ${fmtScore(c)}` + (c.score.reasons.length ? ` – ${c.score.reasons.join(' | ')}` : ''),
+        link: `https://dexscreener.com/solana/${c.mint}`,
+      });
+      return; // höchstens ein Frühphasen-Kauf pro Durchlauf
+    }
+  }
+
+  private async passesSafety(mint: string, symbol: string, buyLamports: bigint, profile: Profile): Promise<boolean> {
+    const c = { mint, symbol };
+    // Frühphase: neue Coins haben naturgemäß weniger Holder – alle anderen Prüfungen bleiben gleich.
+    const safetyCfg = profile === 'early' ? { ...this.cfg, minHolders: this.cfg.earlyMinHolders } : this.cfg;
     let report;
     try {
       report = await this.rug.report(c.mint);
@@ -315,7 +394,7 @@ export class Bot {
       log.info(`${c.symbol} (${c.mint.slice(0, 6)}…): RugCheck-Bericht unvollständig – nicht gekauft, erneute Prüfung in 15 min.`);
       return false;
     }
-    const safety = safetyRejections(report, this.cfg);
+    const safety = safetyRejections(report, safetyCfg);
     if (safety.length) {
       this.state.rejected[c.mint] = Date.now() + SAFETY_REJECT_MS;
       log.info(`${c.symbol} (${c.mint.slice(0, 6)}…): abgelehnt (Sicherheit): ${safety.join('; ')}`);
@@ -339,17 +418,25 @@ export class Bot {
     return true;
   }
 
-  private async openPosition(c: Candidate, buyLamports: bigint): Promise<void> {
-    const p = c.pair;
+  private async openPosition(c: {
+    mint: string;
+    symbol: string;
+    profile: Profile;
+    buyLamports: bigint;
+    summary: string;
+    details?: string;
+    journalReason: string;
+    link: string;
+  }): Promise<void> {
+    const amountSol = profileParams(this.cfg, c.profile).buyAmountSol;
     log.info(
-      `${c.symbol}: alle Prüfungen bestanden (Liq $${Math.round(p.liquidity?.usd ?? 0)}, MCap $${Math.round(p.marketCap ?? 0)}, ` +
-        `Vol 1h $${Math.round(p.volume?.h1 ?? 0)}, 1h ${p.priceChange?.h1 ?? '?'}%). Kaufe für ${this.cfg.buyAmountSol} SOL ` +
-        `${this.trader.live ? '(LIVE)' : '(Papier)'}…`,
+      `${c.symbol}: alle Prüfungen bestanden (${c.summary}). Kaufe für ${amountSol} SOL ` +
+        `${c.profile === 'early' ? '[Frühphase] ' : ''}${this.trader.live ? '(LIVE)' : '(Papier)'}…`,
     );
-    if (c.trend) log.info(`${c.symbol}: Trend-Bezug: ${c.trend.reasons.join(' | ')}`);
+    if (c.details) log.info(`${c.symbol}: ${c.details}`);
     let res;
     try {
-      res = await this.trader.buy(c.mint, buyLamports);
+      res = await this.trader.buy(c.mint, c.buyLamports);
     } catch (e) {
       log.error(`${c.symbol}: Kauf fehlgeschlagen: ${errMsg(e)}`);
       this.state.cooldowns[c.mint] = Date.now() + 30 * 60_000;
@@ -370,6 +457,7 @@ export class Bot {
       peakRatio: 1,
       tookProfit: false,
       buySignature: res.signature,
+      profile: c.profile,
     };
     this.state.positions.push(pos);
     this.state.day.buys += 1;
@@ -380,13 +468,13 @@ export class Bot {
       mint: c.mint,
       sol: lamportsToSol(res.spentLamports),
       tokenRaw: res.tokenRaw.toString(),
-      reason: `Score ${c.score.toFixed(2)}` + (c.trend ? ` – Trend: ${c.trend.reasons.join(' | ')}` : ''),
+      reason: c.journalReason,
       signature: res.signature,
     });
     log.trade(
       `KAUF ${c.symbol} für ${lamportsToSol(res.spentLamports).toFixed(4)} SOL` +
         (res.signature ? ` – https://solscan.io/tx/${res.signature}` : '') +
-        ` – https://dexscreener.com/solana/${c.pair.pairAddress}`,
+        ` – ${c.link}`,
     );
     this.save();
   }
@@ -401,6 +489,11 @@ export class Bot {
       }
     }
   }
+}
+
+function fmtScore(c: EarlyCandidate): string {
+  const s = c.score;
+  return `${s.total}/100 (Narrativ ${s.narrative}, Momentum ${s.momentum}, Community ${s.community}, Sicherheit ${s.safety})`;
 }
 
 function fmtPct(ratio: number): string {

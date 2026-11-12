@@ -79,6 +79,29 @@ export interface Config {
   trendMaxPairAgeHours: number;
   trendMaxMarketCapUsd: number;
 
+  // Frühphasen-Radar (ganz neue Coins)
+  earlyEnabled: boolean;
+  earlyStream: boolean;
+  earlyBuyAmountSol: number;
+  earlyMaxPositions: number;
+  earlyMinScore: number;
+  earlyMinAgeMinutes: number;
+  earlyMaxAgeMinutes: number;
+  earlyMinLiquidityUsd: number;
+  earlyMinHolders: number;
+  earlyMaxMarketCapUsd: number;
+  earlyMaxDevPct: number;
+  earlyMaxTopHoldersPct: number;
+  earlyMaxDevMints: number;
+  earlyStopLossPct: number;
+  earlyTakeProfitPct: number;
+  earlyTakeProfitSellFraction: number;
+  earlyTrailingStopPct: number;
+  earlyTrailingActivationPct: number;
+  earlyMaxHoldMinutes: number;
+  earlyEvalIntervalSec: number;
+  earlyWatchMax: number;
+
   // Timing
   scanIntervalSec: number;
   positionCheckIntervalSec: number;
@@ -179,6 +202,28 @@ export function loadConfig(env: Env = process.env): Config {
     trendMaxPairAgeHours: num(env, 'TREND_MAX_PAIR_AGE_HOURS', 2160, { min: 1 }),
     trendMaxMarketCapUsd: num(env, 'TREND_MAX_MARKET_CAP_USD', 50_000_000, { min: 0 }),
 
+    earlyEnabled: bool(env, 'EARLY_ENABLED', true),
+    earlyStream: bool(env, 'EARLY_STREAM', true),
+    earlyBuyAmountSol: num(env, 'EARLY_BUY_AMOUNT_SOL', 0.02, { min: 0.001, max: 100 }),
+    earlyMaxPositions: num(env, 'EARLY_MAX_POSITIONS', 2, { min: 0, max: 20, int: true }),
+    earlyMinScore: num(env, 'EARLY_MIN_SCORE', 60, { min: 0, max: 100 }),
+    earlyMinAgeMinutes: num(env, 'EARLY_MIN_AGE_MINUTES', 5, { min: 1 }),
+    earlyMaxAgeMinutes: num(env, 'EARLY_MAX_AGE_MINUTES', 120, { min: 2 }),
+    earlyMinLiquidityUsd: num(env, 'EARLY_MIN_LIQUIDITY_USD', 8000, { min: 0 }),
+    earlyMinHolders: num(env, 'EARLY_MIN_HOLDERS', 40, { min: 0, int: true }),
+    earlyMaxMarketCapUsd: num(env, 'EARLY_MAX_MARKET_CAP_USD', 2_000_000, { min: 0 }),
+    earlyMaxDevPct: num(env, 'EARLY_MAX_DEV_PCT', 10, { min: 0, max: 100 }),
+    earlyMaxTopHoldersPct: num(env, 'EARLY_MAX_TOP_HOLDERS_PCT', 40, { min: 1, max: 100 }),
+    earlyMaxDevMints: num(env, 'EARLY_MAX_DEV_MINTS', 50, { min: 0, int: true }),
+    earlyStopLossPct: num(env, 'EARLY_STOP_LOSS_PCT', 30, { min: 1, max: 95 }),
+    earlyTakeProfitPct: num(env, 'EARLY_TAKE_PROFIT_PCT', 100, { min: 1 }),
+    earlyTakeProfitSellFraction: num(env, 'EARLY_TAKE_PROFIT_SELL_FRACTION', 0.5, { min: 0.05, max: 1 }),
+    earlyTrailingStopPct: num(env, 'EARLY_TRAILING_STOP_PCT', 30, { min: 1, max: 95 }),
+    earlyTrailingActivationPct: num(env, 'EARLY_TRAILING_ACTIVATION_PCT', 40, { min: 0 }),
+    earlyMaxHoldMinutes: num(env, 'EARLY_MAX_HOLD_MINUTES', 120, { min: 1 }),
+    earlyEvalIntervalSec: num(env, 'EARLY_EVAL_INTERVAL_SEC', 60, { min: 20 }),
+    earlyWatchMax: num(env, 'EARLY_WATCH_MAX', 150, { min: 10, max: 1000, int: true }),
+
     scanIntervalSec: num(env, 'SCAN_INTERVAL_SEC', 60, { min: 15 }),
     positionCheckIntervalSec: num(env, 'POSITION_CHECK_INTERVAL_SEC', 15, { min: 5 }),
     maxSafetyChecksPerScan: num(env, 'MAX_SAFETY_CHECKS_PER_SCAN', 4, { min: 1, max: 20, int: true }),
@@ -190,6 +235,9 @@ export function loadConfig(env: Env = process.env): Config {
   }
   for (const g of cfg.trendGeos) {
     if (!/^[A-Z]{2}$/.test(g)) throw new ConfigError(`TREND_GEOS: "${g}" ist kein Ländercode (z. B. US, DE)`);
+  }
+  if (cfg.earlyMinAgeMinutes >= cfg.earlyMaxAgeMinutes) {
+    throw new ConfigError('EARLY_MIN_AGE_MINUTES muss kleiner als EARLY_MAX_AGE_MINUTES sein');
   }
   if (cfg.trendOnly && !cfg.trendEnabled) throw new ConfigError('TREND_ONLY=true erfordert TREND_ENABLED=true');
 
@@ -210,6 +258,9 @@ export function loadConfig(env: Env = process.env): Config {
       );
     }
     if (!cfg.privateKey) throw new ConfigError('Live-Trading erfordert PRIVATE_KEY in der .env-Datei.');
+    if (cfg.earlyEnabled && cfg.earlyBuyAmountSol > cfg.maxDailyLossSol * 10) {
+      throw new ConfigError('EARLY_BUY_AMOUNT_SOL ist im Verhältnis zu MAX_DAILY_LOSS_SOL unplausibel hoch (> 10x).');
+    }
     if (cfg.buyAmountSol > cfg.maxDailyLossSol * 10) {
       throw new ConfigError('BUY_AMOUNT_SOL ist im Verhältnis zu MAX_DAILY_LOSS_SOL unplausibel hoch (> 10x).');
     }

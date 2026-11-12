@@ -133,6 +133,10 @@ function showStatus(): void {
   console.log(` Kaufbetrag:     ${env.BUY_AMOUNT_SOL || '0.05'} SOL, max. ${env.MAX_OPEN_POSITIONS || '3'} Positionen`);
   const trendOn = env.TREND_ENABLED?.trim().toLowerCase() !== 'false';
   const trendOnly = env.TREND_ONLY?.trim().toLowerCase() === 'true';
+  const earlyOn = env.EARLY_ENABLED?.trim().toLowerCase() !== 'false';
+  console.log(
+    ` Frühphase:      ${earlyOn ? `an – ${env.EARLY_BUY_AMOUNT_SOL || '0.02'} SOL pro Kauf, ab Score ${env.EARLY_MIN_SCORE || '60'}` : 'aus'}`,
+  );
   console.log(
     ` Trend-Radar:    ${trendOn ? (trendOnly ? 'an – kauft NUR Trend-Coins' : 'an') : 'aus'}` +
       (trendOn ? ` (${env.TREND_KEYWORDS?.trim() || DEFAULT_TREND_KEYWORDS})` : ''),
@@ -317,6 +321,34 @@ async function configureTrends(): Promise<void> {
   console.log('✔ Trend-Radar gespeichert. Mit TRENDS_ANZEIGEN.bat bzw. "npm run trends" siehst du, was er findet.');
 }
 
+async function configureEarly(): Promise<void> {
+  console.log('\n=== Frühphasen-Radar (ganz neue Coins) ===');
+  console.log('Der Bot sieht neue Coins Sekunden nach dem Start, beobachtet sie einige Minuten und');
+  console.log('kauft nur bei hohem Potenzial-Score. HÖCHSTES RISIKO: über 98 % der neuen Coins sterben.\n');
+  const env = currentEnv();
+  const on = await askYesNo('Frühphasen-Radar einschalten?');
+  if (!on) {
+    save({ EARLY_ENABLED: 'false' });
+    console.log('✔ Frühphasen-Radar ausgeschaltet.');
+    return;
+  }
+  const dAmount = env.EARLY_BUY_AMOUNT_SOL?.trim() || '0.02';
+  const dPos = env.EARLY_MAX_POSITIONS?.trim() || '2';
+  const dScore = env.EARLY_MIN_SCORE?.trim() || '60';
+  const amount = ((await ask(`SOL pro Frühphasen-Kauf [${dAmount}]: `)) || dAmount).replace(',', '.');
+  const pos = (await ask(`Maximal gleichzeitig offene Frühphasen-Positionen [${dPos}]: `)) || dPos;
+  const score = (await ask(`Mindest-Score für einen Kauf, 0–100 (höher = vorsichtiger) [${dScore}]: `)) || dScore;
+  const values = { EARLY_ENABLED: 'true', EARLY_BUY_AMOUNT_SOL: amount, EARLY_MAX_POSITIONS: pos, EARLY_MIN_SCORE: score };
+  try {
+    loadConfig({ ...env, ...values });
+  } catch (e) {
+    console.log(`-> ${e instanceof ConfigError ? e.message : String(e)}\n   Nichts gespeichert.`);
+    return;
+  }
+  save(values);
+  console.log('✔ Gespeichert. Live ansehen mit FRUEHPHASE_ANSEHEN.bat, Erfolg prüfen mit AUSWERTUNG.bat.');
+}
+
 async function enablePaper(): Promise<void> {
   save({ DRY_RUN: 'true', LIVE_TRADING_CONFIRM: null });
   console.log('✔ Papiermodus eingeschaltet (kein echtes Geld).');
@@ -336,6 +368,7 @@ async function main(): Promise<void> {
     console.log(' [4] Zurück in den Papiermodus');
     console.log(' [5] Wallet-Verbindung entfernen');
     console.log(' [6] Trend-Radar einstellen (z. B. GTA 6)');
+    console.log(' [7] Frühphasen-Radar einstellen (ganz neue Coins)');
     console.log(' [0] Beenden');
     const choice = await ask('Auswahl: ');
     switch (choice) {
@@ -360,13 +393,16 @@ async function main(): Promise<void> {
       case '6':
         await configureTrends();
         break;
+      case '7':
+        await configureEarly();
+        break;
       case '':
         break;
       case '0':
         console.log('Einstellungen gespeichert in .env. Tschüss!');
         return;
       default:
-        console.log('Bitte 0–6 eingeben.');
+        console.log('Bitte 0–7 eingeben.');
     }
   }
 }

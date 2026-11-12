@@ -7,18 +7,60 @@ import { solToLamports } from './wallet.js';
  * und wann muss eine bestehende verkauft werden?
  */
 
+export type Profile = 'normal' | 'early';
+
+export interface ProfileParams {
+  buyAmountSol: number;
+  maxPositions: number;
+  stopLossPct: number;
+  takeProfitPct: number;
+  takeProfitSellFraction: number;
+  trailingStopPct: number;
+  trailingActivationPct: number;
+  maxHoldMinutes: number;
+}
+
+/** Risiko- und Ausstiegsparameter je Profil (normal oder Frühphase). */
+export function profileParams(cfg: Config, profile: Profile = 'normal'): ProfileParams {
+  if (profile === 'early') {
+    return {
+      buyAmountSol: cfg.earlyBuyAmountSol,
+      maxPositions: cfg.earlyMaxPositions,
+      stopLossPct: cfg.earlyStopLossPct,
+      takeProfitPct: cfg.earlyTakeProfitPct,
+      takeProfitSellFraction: cfg.earlyTakeProfitSellFraction,
+      trailingStopPct: cfg.earlyTrailingStopPct,
+      trailingActivationPct: cfg.earlyTrailingActivationPct,
+      maxHoldMinutes: cfg.earlyMaxHoldMinutes,
+    };
+  }
+  return {
+    buyAmountSol: cfg.buyAmountSol,
+    maxPositions: cfg.maxOpenPositions,
+    stopLossPct: cfg.stopLossPct,
+    takeProfitPct: cfg.takeProfitPct,
+    takeProfitSellFraction: cfg.takeProfitSellFraction,
+    trailingStopPct: cfg.trailingStopPct,
+    trailingActivationPct: cfg.trailingActivationPct,
+    maxHoldMinutes: cfg.maxHoldMinutes,
+  };
+}
+
 /** Gibt einen Grund zurück, warum KEINE neue Position eröffnet werden darf, sonst null. */
-export function blockNewPositionReason(state: BotState, solBalanceLamports: bigint, cfg: Config): string | null {
-  if (state.positions.length >= cfg.maxOpenPositions) return `maximale Anzahl offener Positionen (${cfg.maxOpenPositions}) erreicht`;
+export function blockNewPositionReason(state: BotState, solBalanceLamports: bigint, cfg: Config, profile: Profile = 'normal'): string | null {
+  const p = profileParams(cfg, profile);
+  const open = state.positions.filter((x) => (x.profile ?? 'normal') === profile).length;
+  const label = profile === 'early' ? 'Frühphasen-Positionen' : 'offener Positionen';
+  if (open >= p.maxPositions) return `maximale Anzahl ${label} (${p.maxPositions}) erreicht`;
   if (state.day.buys >= cfg.maxTradesPerDay) return `Tageslimit von ${cfg.maxTradesPerDay} Käufen erreicht`;
   const dayPnl = BigInt(state.day.realizedPnlLamports);
   if (dayPnl <= -solToLamports(cfg.maxDailyLossSol)) {
     return `Tagesverlust-Limit (${cfg.maxDailyLossSol} SOL) erreicht – keine neuen Käufe bis morgen`;
   }
   // Nach dem Kauf muss noch die Reserve (für Gebühren, Kontomiete, Verkäufe) übrig sein.
-  const needed = solToLamports(cfg.buyAmountSol + cfg.minSolReserve);
+  const needed = solToLamports(p.buyAmountSol + cfg.minSolReserve);
   if (solBalanceLamports < needed) {
-    return `zu wenig SOL (${(Number(solBalanceLamports) / 1e9).toFixed(4)} SOL, benötigt ${(cfg.buyAmountSol + cfg.minSolReserve).toFixed(4)} inkl. Reserve)`;
+    return `zu wenig SOL (${(Number(solBalanceLamports) / 1e9).toFixed(4)} SOL, benötigt ${(p.buyAmountSol + cfg.minSolReserve).toFixed(4)} inkl. Reserve)`;
   }
   return null;
 }
@@ -39,7 +81,8 @@ export function priceRatio(pos: Position, currentValueLamports: bigint): number 
   return (Number(currentValueLamports) / held) / (entry / initial);
 }
 
-export function decideExit(pos: Position, currentValueLamports: bigint, cfg: Config, now = Date.now()): ExitDecision {
+export function decideExit(pos: Position, currentValueLamports: bigint, config: Config, now = Date.now()): ExitDecision {
+  const cfg = profileParams(config, pos.profile ?? 'normal');
   const ratio = priceRatio(pos, currentValueLamports);
   const peakRatio = Math.max(pos.peakRatio, ratio);
   const sell = (fraction: number, reason: string): ExitDecision => ({ action: 'sell', fraction, reason, ratio, peakRatio });

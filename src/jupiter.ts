@@ -47,6 +47,50 @@ export interface OrderParams {
   slippageBps?: number; // 0 oder undefined = automatisch
 }
 
+export interface JupTokenStats {
+  priceChange?: number | null;
+  holderChange?: number | null;
+  buyVolume?: number | null;
+  sellVolume?: number | null;
+  buyOrganicVolume?: number | null;
+  numBuys?: number | null;
+  numSells?: number | null;
+  numTraders?: number | null;
+  numNetBuyers?: number | null;
+}
+
+/** Token-Objekt der Jupiter Tokens API V2 (Felder im Nov. 2026 live geprüft). */
+export interface JupToken {
+  id: string;
+  name: string;
+  symbol: string;
+  createdAt?: string | null;
+  dev?: string | null;
+  launchpad?: string | null;
+  graduatedAt?: string | null;
+  holderCount?: number | null;
+  mcap?: number | null;
+  fdv?: number | null;
+  liquidity?: number | null;
+  usdPrice?: number | null;
+  organicScore?: number | null;
+  twitter?: string | null;
+  website?: string | null;
+  telegram?: string | null;
+  tags?: string[] | null;
+  audit?: {
+    isSus?: boolean | null;
+    mintAuthorityDisabled?: boolean | null;
+    freezeAuthorityDisabled?: boolean | null;
+    topHoldersPercentage?: number | null;
+    devBalancePercentage?: number | null;
+    devMints?: number | null;
+    devMigrations?: number | null;
+  } | null;
+  stats5m?: JupTokenStats | null;
+  stats1h?: JupTokenStats | null;
+}
+
 export class NoRouteError extends Error {}
 
 /**
@@ -90,6 +134,31 @@ export class JupiterClient {
       throw new NoRouteError(`Jupiter: keine Route gefunden (${order.errorMessage ?? order.error ?? 'outAmount=0'})`);
     }
     return order;
+  }
+
+  /** Die neuesten Token (Sekunden bis Minuten alt), inkl. Sicherheits- und Handelsdaten. */
+  async recentTokens(): Promise<JupToken[]> {
+    const list = await requestJson<JupToken[]>(`${BASE}/tokens/v2/recent`, {
+      headers: this.headers(),
+      limiter: this.limiter,
+      retries: 1,
+    });
+    return Array.isArray(list) ? list.filter((t) => typeof t?.id === 'string') : [];
+  }
+
+  /** Aktuelle Daten zu bestimmten Token (max. 30 pro Anfrage, wird automatisch aufgeteilt). */
+  async tokensByMint(mints: string[]): Promise<JupToken[]> {
+    const out: JupToken[] = [];
+    for (let i = 0; i < mints.length; i += 30) {
+      const batch = mints.slice(i, i + 30);
+      const list = await requestJson<JupToken[]>(`${BASE}/tokens/v2/search?query=${batch.join(',')}`, {
+        headers: this.headers(),
+        limiter: this.limiter,
+        retries: 1,
+      });
+      if (Array.isArray(list)) out.push(...list.filter((t) => typeof t?.id === 'string' && batch.includes(t.id)));
+    }
+    return out;
   }
 
   /**

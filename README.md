@@ -35,10 +35,11 @@ Trailing-Stop oder Zeitlimit.
 5. [Befehle](#5-befehle)
 6. [So entscheidet der Bot](#6-so-entscheidet-der-bot)
 7. [Trend-Radar (z. B. GTA 6)](#7-trend-radar-z-b-gta-6)
-8. [Einstellungen](#8-einstellungen)
-9. [Recherche: Vorlagen & Erfahrungen](#9-recherche-vorlagen--erfahrungen)
-10. [Grenzen & bekannte Risiken](#10-grenzen--bekannte-risiken)
-11. [Steuern (Deutschland)](#11-steuern-deutschland)
+8. [Frühphasen-Radar (ganz neue Coins)](#8-frühphasen-radar-ganz-neue-coins)
+9. [Einstellungen](#9-einstellungen)
+10. [Recherche: Vorlagen & Erfahrungen](#10-recherche-vorlagen--erfahrungen)
+11. [Grenzen & bekannte Risiken](#11-grenzen--bekannte-risiken)
+12. [Steuern (Deutschland)](#12-steuern-deutschland)
 
 ---
 
@@ -146,10 +147,12 @@ kleinen VPS (Linux-Server), z. B. mit `pm2` oder `screen`.
 | Strg+C | Bot sauber beenden. Offene Positionen bleiben offen und werden beim nächsten Start weiter verwaltet. |
 | `npm run status` | Guthaben, offene Positionen und Statistik anzeigen |
 | `npm run trends` | Zeigt, was der Trend-Radar im Internet findet und wie die Coins bei den Filtern abschneiden (kauft nichts) |
+| `npm run fruehphase` | Live-Ansicht neuer Coins mit Potenzial-Score (kauft nichts). Laufzeit wählbar: `npm run fruehphase -- 60` |
+| `npm run auswertung` | Zeigt, ob hohe Potenzial-Scores in der Vergangenheit wirklich häufiger gestiegen sind |
 | `npm run check-wallet` | Wallet-Verbindung prüfen (ohne zu handeln) |
 | `npm run sell-all` | Notverkauf aller Positionen. Im Live-Modus: `npm run sell-all -- --ja` (Bot vorher beenden) |
 | Datei `STOP` im Projektordner anlegen | Bot kauft nichts mehr, verwaltet aber bestehende Positionen weiter. Datei löschen = weiter kaufen. |
-| `npm test` | 82 automatische Tests (Entscheidungslogik, Trend-Radar, Konfiguration, Wallet-Import, .env-Bearbeitung) |
+| `npm test` | 98 automatische Tests (Entscheidungslogik, Trend- und Frühphasen-Radar, Konfiguration, Wallet-Import, .env-Bearbeitung) |
 
 ## 6. So entscheidet der Bot
 
@@ -237,13 +240,59 @@ Reddit blockiert automatische Abfragen, X/Twitter ist kostenpflichtig. Beide sin
 
 Was der Radar gerade findet, zeigt `npm run trends` (Windows: `TRENDS_ANZEIGEN.bat`). Der Befehl kauft nichts.
 
-## 8. Einstellungen
+## 8. Frühphasen-Radar (ganz neue Coins)
+
+Der Frühphasen-Radar sieht neue Coins **Sekunden nach dem Start** und bewertet, ob sie Potenzial haben.
+
+**Woher die neuen Coins kommen:**
+- **PumpPortal-Stream:** Jeder neue Pump.fun-Coin kommt in Echtzeit an, ebenso jeder Coin, der seine Bonding-Curve abschließt. Der Dienst ist kostenlos. Der Anbieter erlaubt nur **eine** Verbindung, der Bot hält sich strikt daran.
+- **Jupiter „recent“:** Die neuesten Coins aller Launchpads, inklusive Sicherheitsdaten.
+
+**Warum nicht in der ersten Sekunde kaufen?** Professionelle Sniper-Bots kaufen in den ersten ~1,3 Sekunden. Gegen sie
+hat ein Heim-PC keine Chance. Außerdem sterben über 98 % der Pump.fun-Coins, die meisten Rug-Pulls passieren in den
+ersten Minuten, und 2026 schafften zeitweise nur 0,3–2 % den Abschluss der Bonding-Curve. Darum
+**beobachtet** der Bot jeden Coin erst einige Minuten (Standard: 5) und bewertet ihn dann.
+
+**Der Potenzial-Score (0–100)** besteht aus vier nachvollziehbaren Teilen:
+
+| Teil | Punkte | Woraus |
+|---|---|---|
+| **Narrativ & Nische** | bis 35 | Passt der Name zu deinen Trend-Stichwörtern (z. B. GTA 6, +20) oder einem Internet-Trend (+10)? Gehört er zu einer gerade **heißen Nische** (Cat, Dog, AI, Frog, Gaming …)? Wie heiß eine Nische ist, misst DexScreener live. |
+| **Momentum** | bis 35 | Neue Holder pro Minute, Anteil Netto-Käufer, Kauf- vs. Verkaufsvolumen, Anstieg seit Entdeckung, Jupiters „Organic Score“ (echte Nutzer statt Bots), abgeschlossene Bonding-Curve |
+| **Community** | bis 15 | X/Twitter, Website, Telegram vorhanden |
+| **Sicherheit** | bis 15 | Geringer Entwickler-Anteil, verteilte Holder, kein Massen-Launcher |
+
+**Harte Ausschlüsse**, die auch bei hohem Score gelten:
+- von Jupiter als verdächtig markiert
+- Mint- oder Freeze-Authority nicht entzogen
+- Entwickler hält mehr als 10 %
+- Top-Holder halten mehr als 40 %
+- Entwickler hat mehr als 50 Coins gestartet (Massen-Launcher; im Test fand sich einer mit 11.038 Coins)
+- Kurs liegt über 50 % unter dem Hoch oder ist in 5 Minuten um 40 % gefallen
+
+Ab Score 60 folgen dieselben **RugCheck- und Honeypot-Prüfungen** wie bei normalen Käufen, mit einem einzigen
+Unterschied: Es reichen 40 statt 300 Holder.
+
+**Eigenes, vorsichtiges Risikoprofil:**
+- 0,02 SOL pro Kauf, höchstens 2 Frühphasen-Positionen
+- Stop-Loss −30 %, Take-Profit +100 % (die Hälfte wird verkauft), Trailing-Stop 30 %, maximale Haltedauer 2 Stunden
+- Tagesverlust-Limit und SOL-Reserve gelten gemeinsam mit den normalen Käufen.
+
+**Erfolgsmessung, der wichtigste Teil:** Jeder bewertete Coin wird mit seinem Score in `data/fruehphase.csv`
+gespeichert. 15 und 60 Minuten später notiert der Bot, wie sich der Kurs entwickelt hat, **auch bei Coins, die er
+nicht gekauft hat**. `npm run auswertung` (Windows: `AUSWERTUNG.bat`) zeigt dann, ob Coins mit hohem Score
+wirklich häufiger gestiegen und seltener abgestürzt sind. Erst wenn das über viele Coins der Fall ist, ist der
+Score etwas wert. Sonst sollte die Frühphase **nicht live** genutzt werden.
+
+Live zuschauen: `npm run fruehphase` (Windows: `FRUEHPHASE_ANSEHEN.bat`). Der Befehl kauft nichts.
+
+## 9. Einstellungen
 
 Alle Parameter stehen kommentiert in [`.env.example`](.env.example). Jeder Wert wird beim Start
 geprüft. Unsinnige Werte (z. B. Stop-Loss 0 %, Text statt Zahl) führen zu einer klaren
 Fehlermeldung statt zu falschen Trades.
 
-## 9. Recherche: Vorlagen & Erfahrungen
+## 10. Recherche: Vorlagen & Erfahrungen
 
 Vor der Entwicklung wurden Open-Source-Projekte, offizielle API-Dokumentationen und Berichte aus
 Krypto-Medien und von Sicherheitsfirmen ausgewertet. Die Kernergebnisse:
@@ -280,7 +329,7 @@ ein separates Konto mit wenig Geld.
 - RugCheck (`api.rugcheck.xyz/v1/tokens/{mint}/report`)
 - `@solana/web3.js` v3 (aktuelle Version mit asynchroner Signatur)
 
-## 10. Grenzen & bekannte Risiken
+## 11. Grenzen & bekannte Risiken
 
 - **Keine Gewinngarantie.** Auch Token, die alle Prüfungen bestehen, können abstürzen oder später
   manipuliert werden. RugCheck & Co. erkennen nicht jeden Betrug.
@@ -296,7 +345,7 @@ ein separates Konto mit wenig Geld.
   Jupiter-Transaktionen wurden dekodiert und geprüft. Ein echter Swap mit Geld wurde bei der
   Entwicklung nicht ausgeführt. Starte deshalb mit sehr kleinen Beträgen.
 
-## 11. Steuern (Deutschland)
+## 12. Steuern (Deutschland)
 
 Gewinne aus Kryptowährungen, die du **weniger als ein Jahr** hältst, sind in Deutschland als private
 Veräußerungsgeschäfte steuerpflichtig. Es gilt eine Freigrenze von 1.000 € pro Jahr (seit 2024).
