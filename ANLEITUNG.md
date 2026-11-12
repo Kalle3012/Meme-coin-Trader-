@@ -20,6 +20,7 @@ Du brauchst **keine Programmierkenntnisse** und musst **keine Dateien von Hand b
 | `TRENDS_ANZEIGEN.bat` | Zeigt, welche Trends (z. B. GTA 6) und passenden Coins der Bot gerade findet (kauft nichts) |
 | `FRUEHPHASE_ANSEHEN.bat` | Zeigt 30 Minuten live, welche **ganz neuen** Coins der Bot sieht und wie er ihr Potenzial bewertet (kauft nichts) |
 | `AUSWERTUNG.bat` | Zeigt, ob Coins mit hohem Potenzial-Score später wirklich gestiegen sind |
+| `BACKTEST.bat` | Coin-Adresse einfügen und sehen, was die Regeln des Bots mit diesem Coin gemacht hätten |
 | `WALLET_PRUEFEN.bat` | Prüft die Verbindung zum Bot-Konto (handelt nicht) |
 | `KAEUFE_PAUSIEREN.bat` | Bot kauft nichts Neues mehr, verwaltet aber offene Positionen weiter |
 | `KAEUFE_FORTSETZEN.bat` | Hebt die Pause auf |
@@ -144,6 +145,9 @@ zusammen. Ab 60 Punkten (einstellbar) und nach bestandener Betrugsprüfung kauft
   Steht dort „✗ Hohe Scores haben sich NICHT klar besser entwickelt“, solltest du die Frühphase **nicht live** nutzen.
 - **Einstellen oder ausschalten:** `2_EINRICHTEN.bat` → **`7`**.
 - ⚠️ Das ist der **riskanteste** Teil des Bots. Über 98 % der neuen Coins sterben, oft innerhalb von Minuten.
+- **Ein Coin ist dir aufgefallen (z. B. Dacity)?** `BACKTEST.bat` → Adresse einfügen. Du siehst, wann der große
+  Sprung war und was der Bot bei einem Einstieg danach erreicht hätte. Bei Dacity lag der Median bei −4 %: Der
+  27-fache Anstieg kam in einer Stunde, 18 Stunden vor dem ersten News-Artikel.
 
 ## Im Alltag
 

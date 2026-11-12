@@ -435,6 +435,11 @@ export class EarlyRadar {
         w.lastMcap = mcap;
       }
       const ageMin = (now - w.createdAt) / 60_000;
+      if (ageMin > this.cfg.earlyMaxAgeMinutes && !w.ratedAt) {
+        // Kein Frühphasen-Coin (z. B. alte Coins aus dem Migrations-Stream) -> gar nicht bewerten.
+        this.watch.delete(w.mint);
+        continue;
+      }
       w.score = scoreEarly(t, { ageMin, firstMcap: w.firstMcap, maxMcap: w.maxMcap, graduated: w.graduated, topics, nicheHeat: this.nicheHeat }, this.cfg);
 
       // Erste vollständige Bewertung nach der Mindest-Beobachtungszeit -> Messung starten.

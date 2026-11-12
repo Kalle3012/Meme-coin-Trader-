@@ -149,10 +149,11 @@ kleinen VPS (Linux-Server), z. B. mit `pm2` oder `screen`.
 | `npm run trends` | Zeigt, was der Trend-Radar im Internet findet und wie die Coins bei den Filtern abschneiden (kauft nichts) |
 | `npm run fruehphase` | Live-Ansicht neuer Coins mit Potenzial-Score (kauft nichts). Laufzeit wählbar: `npm run fruehphase -- 60` |
 | `npm run auswertung` | Zeigt, ob hohe Potenzial-Scores in der Vergangenheit wirklich häufiger gestiegen sind |
+| `npm run backtest -- <Adresse>` | Was hätten die Regeln des Bots mit einem bestimmten Coin gemacht? (echte Stundenkurse der letzten ~40 Tage) |
 | `npm run check-wallet` | Wallet-Verbindung prüfen (ohne zu handeln) |
 | `npm run sell-all` | Notverkauf aller Positionen. Im Live-Modus: `npm run sell-all -- --ja` (Bot vorher beenden) |
 | Datei `STOP` im Projektordner anlegen | Bot kauft nichts mehr, verwaltet aber bestehende Positionen weiter. Datei löschen = weiter kaufen. |
-| `npm test` | 98 automatische Tests (Entscheidungslogik, Trend- und Frühphasen-Radar, Konfiguration, Wallet-Import, .env-Bearbeitung) |
+| `npm test` | 112 automatische Tests (Entscheidungslogik, Trend- und Frühphasen-Radar, Konfiguration, Wallet-Import, .env-Bearbeitung) |
 
 ## 6. So entscheidet der Bot
 
@@ -284,7 +285,22 @@ nicht gekauft hat**. `npm run auswertung` (Windows: `AUSWERTUNG.bat`) zeigt dann
 wirklich häufiger gestiegen und seltener abgestürzt sind. Erst wenn das über viele Coins der Fall ist, ist der
 Score etwas wert. Sonst sollte die Frühphase **nicht live** genutzt werden.
 
+**Wichtig:** Ein Coin **ohne** Trend- oder Nischenbezug kommt selbst bei sehr guten Zahlen nur auf etwa 50–55
+Punkte. Gekauft wird also nur, wenn der Coin zu einem aktuellen Trend, einem deiner Stichwörter oder einer gerade
+heißen Nische passt **und** die Zahlen stimmen.
+
 Live zuschauen: `npm run fruehphase` (Windows: `FRUEHPHASE_ANSEHEN.bat`). Der Befehl kauft nichts.
+
+**Fallstudie Dacity Coin (echte Stundendaten, `npm run backtest -- nxPqZ4F7ux8Vph5NFu25rEP6Kx9Gr1U6Fmj36Rjpump`):**
+- 11.10.2026: Der Coin entsteht. Am ersten Tag fällt er um 86 %, danach ist er drei Tage praktisch tot.
+- 15.10.2026, 13:00 UTC: Der GTA-6-Trailer erscheint, und der Kurs steigt **in einer Stunde um das 27-Fache**. 24 Stunden später steht er 54 % unter diesem Hoch.
+- Der **erste News-Artikel erschien 18 Stunden nach dem Sprung**. Kein Bot, der News oder Trends liest, hätte den ersten Anstieg erwischt.
+- Hoch am 21.10. bei 0,0173 $. Am 11.11. folgte ein Absturz um 78 %, insgesamt −89 % vom Hoch.
+- Ein Einstieg zu jeder beliebigen Stunde mit den Regeln des Bots hätte im Median **−4 %** gebracht, und nur ein Drittel der Trades wäre im Gewinn gewesen. Wer am Hoch gekauft und gehalten hätte, läge bei **−89 %**.
+
+Lehre daraus: Die großen Gewinne solcher Coins entstehen meist in Minuten, bevor es öffentlich bekannt ist. Danach
+ist der Kurs vor allem ein Glücksspiel. Darum kauft der Bot nicht nach +100 % in einer Stunde und nutzt feste Stops.
+Mit `npm run backtest` (Windows: `BACKTEST.bat`) kannst du jeden Coin, der dir auffällt, genauso prüfen.
 
 ## 9. Einstellungen
 

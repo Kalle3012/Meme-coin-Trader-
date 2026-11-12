@@ -15,6 +15,7 @@
     "trends": "tsx src/scripts/trends.ts",
     "fruehphase": "tsx src/scripts/fruehphase.ts",
     "auswertung": "tsx src/scripts/auswertung.ts",
+    "backtest": "tsx src/scripts/backtest.ts",
     "sell-all": "tsx src/scripts/sell-all.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts"
